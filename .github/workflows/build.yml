@@ -1,0 +1,274 @@
+name: Build unsigned Windows desktop
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '官方版本 tag；latest 自动选择最新版本（不构建分支）'
+        type: string
+        required: true
+        default: latest
+
+# One channel, including discovery and publication, across scheduled/manual runs.
+concurrency:
+  group: desktop-channel
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      should_build: ${{ steps.discover.outputs.should_build }}
+      tag: ${{ steps.discover.outputs.tag }}
+      version: ${{ steps.discover.outputs.version }}
+      source_sha: ${{ steps.discover.outputs.source_sha }}
+      pnpm_version: ${{ steps.discover.outputs.pnpm_version }}
+      release_tag: ${{ steps.discover.outputs.release_tag }}
+    steps:
+      - name: Checkout this builder
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Test version selection and release publication
+        run: node --test --test-isolation=none tests/*.test.mjs
+      - name: Resolve an official tag to an immutable commit
+        id: discover
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag || 'latest' }}
+        run: |
+          set -o pipefail
+          node scripts/cli.mjs discover 2>&1 | tee "$RUNNER_TEMP/discover.log"
+      - name: Retain discovery failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: discover-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/discover.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  build:
+    needs: discover
+    if: needs.discover.outputs.should_build == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SOURCE_DIR: ${{ github.workspace }}/source
+      BUNDLE_DIR: ${{ runner.temp }}/desktop-bundle
+      LOG_DIR: ${{ runner.temp }}/desktop-logs
+      DSH_PACKAGING_PRESET: production
+      DSH_PACKAGING_CONFIG_DIR: ${{ runner.temp }}/desktop-packaging
+      DSH_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Checkout this builder at the workflow commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Checkout only the official source at the resolved SHA
+        id: source
+        uses: actions/checkout@v5
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ needs.discover.outputs.source_sha }}
+          path: source
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Check pristine source and manifest inputs
+        env:
+          SOURCE_SHA: ${{ needs.discover.outputs.source_sha }}
+          SOURCE_VERSION: ${{ needs.discover.outputs.version }}
+          PNPM_VERSION: ${{ needs.discover.outputs.pnpm_version }}
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:LOG_DIR | Out-Null
+          $head = git -C $env:SOURCE_DIR rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:SOURCE_SHA) { throw 'Source HEAD differs from selected SHA' }
+          git -C $env:SOURCE_DIR diff --exit-code HEAD -- | Tee-Object -FilePath "$env:LOG_DIR/source-before.diff"
+          if ($LASTEXITCODE -ne 0) { throw 'Source has tracked changes before build' }
+          $status = @(git -C $env:SOURCE_DIR status --porcelain=v1 --untracked-files=all)
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect source status' }
+          $status | Set-Content -Encoding utf8 "$env:LOG_DIR/source-before.status"
+          if ($status.Count -ne 0) { throw 'Source must start completely clean' }
+          $manifest = Get-Content -Raw "$env:SOURCE_DIR/package.json" | ConvertFrom-Json
+          $desktop = Get-Content -Raw "$env:SOURCE_DIR/apps/desktop/package.json" | ConvertFrom-Json
+          if ($manifest.version -cne $env:SOURCE_VERSION -or $desktop.version -cne $env:SOURCE_VERSION) { throw 'Source manifest versions do not match discovery' }
+          if ($manifest.packageManager -notmatch '^pnpm@([0-9]+\.[0-9]+\.[0-9]+)(?:\+sha[0-9]+\.[A-Za-z0-9+/=]+)?$') { throw 'Source must declare an exact pnpm packageManager' }
+          if ($Matches[1] -cne $env:PNPM_VERSION) { throw 'pnpm manifest differs from discovery' }
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          architecture: x64
+          package-manager-cache: false
+      - name: Set up the exact source-declared pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: source/package.json
+          dest: ${{ runner.temp }}/builder-pnpm
+          run_install: false
+      - name: Set up Python for native dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Locate pnpm store and record hosted toolchain
+        id: cache
+        run: |
+          $store = pnpm store path --silent
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot locate pnpm store' }
+          "store=$store" >> $env:GITHUB_OUTPUT
+          node --version | Tee-Object -FilePath "$env:LOG_DIR/toolchain.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Node is unavailable' }
+          pnpm --version | Tee-Object -FilePath "$env:LOG_DIR/toolchain.log" -Append
+          if ($LASTEXITCODE -ne 0) { throw 'pnpm is unavailable' }
+          python --version 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/toolchain.log" -Append
+          if ($LASTEXITCODE -ne 0) { throw 'Python is unavailable' }
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw 'Hosted Visual Studio C++ tools are missing' }
+          $vs | Tee-Object -FilePath "$env:LOG_DIR/toolchain.log" -Append
+      - name: Cache only pnpm store and immutable runtime downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.cache.outputs.store }}
+            source/apps/desktop/.desktop-build/downloads
+          key: desktop-v1-windows-2025-x64-node24-pnpm${{ needs.discover.outputs.pnpm_version }}-${{ hashFiles('source/pnpm-lock.yaml', 'source/pnpm-workspace.yaml', 'source/.npmrc', 'source/package.json', 'source/apps/desktop/package.json', 'source/scripts/primary-runtime/**', 'source/apps/desktop/scripts/**', 'source/apps/desktop/electron-builder.*') }}
+      - name: Create public production preset outside the source tree
+        run: |
+          $presets = Join-Path $env:DSH_PACKAGING_CONFIG_DIR 'presets'
+          New-Item -ItemType Directory -Force -Path $presets | Out-Null
+          @'
+          DSH_DESKTOP_APP_ID=com.deepseek.dsh
+          DSH_DESKTOP_AUTO_UPDATE_ENV=production
+          DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN=https://harness.deepseek.com
+          DSH_DESKTOP_MANDATORY_UPDATE_CONFIG='{}'
+          '@ | Set-Content -Encoding utf8 (Join-Path $presets 'production.env')
+      - name: Install frozen upstream dependencies
+        working-directory: source
+        run: |
+          pnpm install --frozen-lockfile 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check the complete public unsigned packaging entrypoint
+        working-directory: source
+        run: |
+          pnpm run package:desktop:win:x64:unsigned --check 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/package-check.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build with the unmodified public unsigned packaging entrypoint
+        working-directory: source
+        run: |
+          pnpm run package:desktop:win:x64:unsigned 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/package.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # Run even after install/check/build fails. Never reset or hide tracked changes.
+      - name: Audit source tracked diff and status after every build outcome
+        if: always() && steps.source.outcome == 'success'
+        env:
+          SOURCE_SHA: ${{ needs.discover.outputs.source_sha }}
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:LOG_DIR | Out-Null
+          git -C $env:SOURCE_DIR diff HEAD -- | Tee-Object -FilePath "$env:LOG_DIR/source-after.diff"
+          $diffResult = $LASTEXITCODE
+          git -C $env:SOURCE_DIR status --porcelain=v1 --untracked-files=all | Tee-Object -FilePath "$env:LOG_DIR/source-after.status"
+          $statusResult = $LASTEXITCODE
+          git -C $env:SOURCE_DIR diff --exit-code HEAD --
+          $trackedResult = $LASTEXITCODE
+          $head = git -C $env:SOURCE_DIR rev-parse HEAD
+          $headResult = $LASTEXITCODE
+          if ($diffResult -ne 0 -or $statusResult -ne 0 -or $trackedResult -ne 0 -or $headResult -ne 0 -or $head -cne $env:SOURCE_SHA) {
+            throw 'Source changed or audit failed; refusing publication. See source-after diagnostics.'
+          }
+      - name: Collect exactly one EXE with verified metadata and SHA256
+        env:
+          SOURCE_TAG: ${{ needs.discover.outputs.tag }}
+          SOURCE_SHA: ${{ needs.discover.outputs.source_sha }}
+          BUILDER_SHA: ${{ github.sha }}
+          BUILD_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node scripts/cli.mjs collect 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/collect.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload verified publication bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.BUNDLE_DIR }}/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Retain build and source-audit diagnostics, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          path: |
+            ${{ env.LOG_DIR }}/
+            source/apps/desktop/.desktop-build/packaging-runs/
+          if-no-files-found: warn
+          retention-days: 14
+
+  publish:
+    needs: [discover, build]
+    if: >-
+      always() && needs.discover.result == 'success' &&
+      (needs.build.result == 'success' ||
+      (needs.build.result == 'skipped' && needs.discover.outputs.should_build == 'false'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      BUNDLE_DIR: ${{ runner.temp }}/desktop-bundle
+    steps:
+      - name: Checkout trusted builder only (never execute upstream here)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Download the verified Windows bundle from this run
+        if: needs.discover.outputs.should_build == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.BUNDLE_DIR }}
+      - name: Publish verified versioned prerelease, then update current
+        if: needs.discover.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          node scripts/cli.mjs publish 2>&1 | tee "$RUNNER_TEMP/publish.log"
+      - name: Repair current pointer when this version is already published
+        if: needs.discover.outputs.should_build == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          node scripts/cli.mjs refresh 2>&1 | tee "$RUNNER_TEMP/publish.log"
+      - name: Retain publication failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/publish.log
+          if-no-files-found: warn
+          retention-days: 14
