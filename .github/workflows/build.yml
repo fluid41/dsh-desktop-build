@@ -71,10 +71,10 @@ jobs:
         shell: pwsh
     env:
       SOURCE_DIR: ${{ github.workspace }}/source
-      BUNDLE_DIR: ${{ runner.temp }}/desktop-bundle
-      LOG_DIR: ${{ runner.temp }}/desktop-logs
+      BUNDLE_DIR: ${{ github.workspace }}/bundle
+      LOG_DIR: ${{ github.workspace }}/.local/desktop-logs
       DSH_PACKAGING_PRESET: production
-      DSH_PACKAGING_CONFIG_DIR: ${{ runner.temp }}/desktop-packaging
+      DSH_PACKAGING_CONFIG_DIR: ${{ github.workspace }}/.local/desktop-packaging
       DSH_TELEMETRY_DISABLED: '1'
     steps:
       - name: Checkout this builder at the workflow commit
@@ -233,7 +233,7 @@ jobs:
     permissions:
       contents: write
     env:
-      BUNDLE_DIR: ${{ runner.temp }}/desktop-bundle
+      BUNDLE_DIR: ${{ github.workspace }}/bundle
     steps:
       - name: Checkout trusted builder only (never execute upstream here)
         uses: actions/checkout@v5
