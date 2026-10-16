@@ -1,5 +1,5 @@
 import { appendFile, mkdir, readFile, readdir, stat, writeFile, copyFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GitHub } from './github.mjs';
 import { UPSTREAM, CURRENT_TAG, versionFromTag, releaseTag, installerName, hash, selectUpstreamRelease, validateSource, shouldBuild, assertCompleteRelease, selectCurrentRelease, releaseIdentity, renderReleaseBody, renderCurrentBody } from './core.mjs';
