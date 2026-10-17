@@ -1,5 +1,7 @@
 # DSH Desktop · Windows 自构建
 
+[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+
 跟随 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 官方预发布版本，自动构建并发布 Windows x64 安装包。保留官方源码、版本号和依赖锁文件，不修改账号或插件配置。
 
 ## 下载与更新
@@ -46,5 +48,3 @@ npm test
 ```
 
 这是个人构建项目，并非 DeepSeek 官方发布渠道。上游许可证和第三方声明随应用保留。
-
-[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)

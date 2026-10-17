@@ -37,11 +37,15 @@ test('每六小时整点检查，对应北京时间 00、06、12、18 点', () =
   }
 });
 
-test('说明文档与发布页均使用官方徽标，并放在可见正文末尾', () => {
+test('说明文档与发布页均使用官方徽标，并紧随第一行主标题放置', () => {
   for (const text of [readme, renderReleaseBody(build, sha256), renderCurrentBody(release)]) {
     assert.equal(text.split(badge).length - 1, 1);
-    const visible = text.replace(/<!--[\s\S]*?-->/g, '').trim();
-    assert.ok(visible.endsWith(badge));
+    const lines = text.split(/\r?\n/);
+    assert.match(lines[0], /^#{1,2}\s+.+/);
+    assert.equal(lines[1], '');
+    assert.equal(lines[2], badge);
+    assert.equal(lines[3], '');
+    assert.ok(lines[4].length > 0);
   }
 });
 

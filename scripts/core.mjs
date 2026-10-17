@@ -115,6 +115,8 @@ export function renderReleaseBody(build, exeHash) {
   const version = versionFromTag(build.sourceTag);
   return `## DSH Desktop ${version} · Windows x64
 
+${DSH_BADGE}
+
 基于官方预发布标签原样构建，已通过上游打包和运行时检查。
 
 ### 安装与更新
@@ -130,8 +132,6 @@ export function renderReleaseBody(build, exeHash) {
 - 构建日志：[GitHub Actions](${build.runUrl})
 - 安装包 SHA-256：\`${exeHash}\`
 
-${DSH_BADGE}
-
 <!-- dsh-source-sha:${build.sourceSha} -->
 `;
 }
@@ -142,6 +142,8 @@ export function renderCurrentBody(release) {
   const sums = release.assets.find(asset => asset.name === 'SHA256SUMS');
   const historyUrl = new URL('../..', `${release.html_url}/`).href;
   return `# 当前版本：${version}
+
+${DSH_BADGE}
 
 ## [下载 Windows x64 安装包](${exe.browser_download_url})
 
@@ -154,8 +156,6 @@ export function renderCurrentBody(release) {
 每天北京时间 **00:00、06:00、12:00、18:00** 检查新版。新版本构建并校验成功后更新此入口，失败时保留上一可用版本。
 
 在仓库 **Watch → Custom → Releases** 订阅新版通知。
-
-${DSH_BADGE}
 
 <!-- dsh-current-version:${version} -->
 <!-- dsh-source-sha:${sourceSha} -->
