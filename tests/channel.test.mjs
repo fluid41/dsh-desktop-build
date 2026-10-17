@@ -165,38 +165,38 @@ test('explicit published official prerelease tag is honored, but not a branch or
   const older = 'dsh-v0.2.1-alpha.9';
   const releases = [official(TAG), official(older), official('dsh-v0.2.1-alpha.11', { draft: true })];
   assert.equal(selectUpstreamRelease(releases, older).tag_name, older);
-  assert.throws(() => selectUpstreamRelease(releases, 'master'), /official/);
-  assert.throws(() => selectUpstreamRelease(releases, 'sdk-v0.2.1-alpha.9'), /official/);
-  assert.throws(() => selectUpstreamRelease(releases, 'dsh-v0.2.1-alpha.11'), /published/);
-  assert.throws(() => selectUpstreamRelease([], 'latest'), /No published/);
+  assert.throws(() => selectUpstreamRelease(releases, 'master'), /官方/);
+  assert.throws(() => selectUpstreamRelease(releases, 'sdk-v0.2.1-alpha.9'), /官方/);
+  assert.throws(() => selectUpstreamRelease(releases, 'dsh-v0.2.1-alpha.11'), /未找到此标签/);
+  assert.throws(() => selectUpstreamRelease([], 'latest'), /未找到已发布/);
 });
 
 test('source manifests must agree with the tag and declare exact pnpm', () => {
   const root = { version: VERSION, packageManager: 'pnpm@11.28.5' };
   const desktop = { version: VERSION, scripts: { 'package:win:x64:unsigned': 'entry' } };
   assert.deepEqual(validateSource(TAG, root, desktop), { version: VERSION, pnpmVersion: '11.28.5' });
-  assert.throws(() => validateSource(TAG, { ...root, version: '0.2.1-alpha.9' }, desktop), /disagree/);
-  assert.throws(() => validateSource(TAG, { ...root, packageManager: 'pnpm@latest' }, desktop), /exact pnpm/);
-  assert.throws(() => validateSource(TAG, root, { version: VERSION, scripts: {} }), /entrypoint/);
+  assert.throws(() => validateSource(TAG, { ...root, version: '0.2.1-alpha.9' }, desktop), /不一致/);
+  assert.throws(() => validateSource(TAG, { ...root, packageManager: 'pnpm@latest' }, desktop), /精确的 pnpm/);
+  assert.throws(() => validateSource(TAG, root, { version: VERSION, scripts: {} }), /打包入口/);
 });
 
 test('only a complete published release at the same tag and SHA skips a build', () => {
   assert.equal(shouldBuild(undefined, TAG, SOURCE_SHA), true);
   assert.equal(shouldBuild({ draft: true }, TAG, SOURCE_SHA), true);
   assert.equal(shouldBuild(complete(), TAG, SOURCE_SHA), false);
-  assert.throws(() => shouldBuild(complete(), TAG, 'c'.repeat(40)), /different source commit/);
+  assert.throws(() => shouldBuild(complete(), TAG, 'c'.repeat(40)), /源码提交不同/);
 });
 
 test('a published release missing any required asset is rejected, not rebuilt or accepted', () => {
   for (const name of [installerName(VERSION), 'build.json', 'SHA256SUMS']) {
     const release = complete();
     release.assets = release.assets.filter(asset => asset.name !== name);
-    assert.throws(() => assertCompleteRelease(release), /missing a complete/);
-    assert.throws(() => shouldBuild(release, TAG, SOURCE_SHA), /missing a complete/);
+    assert.throws(() => assertCompleteRelease(release), /缺失或不完整/);
+    assert.throws(() => shouldBuild(release, TAG, SOURCE_SHA), /缺失或不完整/);
   }
   const release = complete();
   release.assets[0].state = 'new';
-  assert.throws(() => shouldBuild(release, TAG, SOURCE_SHA), /missing a complete/);
+  assert.throws(() => shouldBuild(release, TAG, SOURCE_SHA), /缺失或不完整/);
 });
 
 test('discover is read-only and resolves official manifests at a single SHA', async () => {
@@ -211,7 +211,7 @@ test('discover is read-only and resolves official manifests at a single SHA', as
 
 test('discover skips an already successful matching release and rejects a moved tag', async () => {
   assert.equal((await discover(baseEnv, discoveryApi({ existing: complete() }))).should_build, 'false');
-  await assert.rejects(discover(baseEnv, discoveryApi({ existing: complete(), sha: 'c'.repeat(40) })), /different source commit/);
+  await assert.rejects(discover(baseEnv, discoveryApi({ existing: complete(), sha: 'c'.repeat(40) })), /源码提交不同/);
 });
 
 test('upload failure leaves a draft and never publishes or changes current', async t => {
@@ -228,7 +228,7 @@ test('upload failure leaves a draft and never publishes or changes current', asy
 test('bad uploaded digest prevents publication and current update', async t => {
   const fixture = await bundle(t);
   const api = publicationApi({ badDigest: true });
-  await assert.rejects(publish({ ...baseEnv, BUNDLE_DIR: fixture.directory }, api), /digest mismatch/);
+  await assert.rejects(publish({ ...baseEnv, BUNDLE_DIR: fixture.directory }, api), /校验值不一致/);
   assert.equal(api.events.some(publishesVersion), false);
   assert.equal(api.events.some(writesCurrent), false);
 });
@@ -236,7 +236,7 @@ test('bad uploaded digest prevents publication and current update', async t => {
 test('the fetched draft must contain every uploaded asset before publication', async t => {
   const fixture = await bundle(t);
   const api = publicationApi({ missingReadyAsset: true });
-  await assert.rejects(publish({ ...baseEnv, BUNDLE_DIR: fixture.directory }, api), /missing a complete/);
+  await assert.rejects(publish({ ...baseEnv, BUNDLE_DIR: fixture.directory }, api), /缺失或不完整/);
   assert.equal(api.events.filter(event => event.op === 'upload').length, 3);
   assert.equal(api.events.some(publishesVersion), false);
   assert.equal(api.events.some(writesCurrent), false);
@@ -273,7 +273,7 @@ test('refresh chooses the greatest complete SemVer regardless of list order', as
 
 test('refresh refuses to downgrade a newer current pointer', async () => {
   const api = publicationApi({ releases: [complete()], current: { id: 90, tag_name: 'current', draft: false, body: '<!-- dsh-current-version:0.2.1-alpha.11 -->' } });
-  await assert.rejects(refresh(baseEnv, api), /backwards/);
+  await assert.rejects(refresh(baseEnv, api), /目标版本低于当前版本/);
   assert.equal(api.events.some(writesCurrent), false);
 });
 

@@ -11,8 +11,8 @@ test('API credentials are never forwarded to arbitrary hosts or redirect targets
     assert.equal(options.headers.Authorization, 'Bearer test-token');
     return new Response('{"login":"test"}', { status: 200 });
   } });
-  await assert.rejects(api.request('https://example.com/collect'), /Untrusted/);
-  await assert.rejects(api.request('http://api.github.com/user'), /Untrusted/);
+  await assert.rejects(api.request('https://example.com/collect'), /不允许向此地址/);
+  await assert.rejects(api.request('http://api.github.com/user'), /不允许向此地址/);
   assert.equal(calls, 0);
   assert.equal((await api.request('/user')).login, 'test');
   assert.equal(calls, 1);
@@ -44,5 +44,5 @@ test('annotated and lightweight source tags resolve to immutable commits', async
 
 test('unexpected release upload destinations are rejected before opening a file', async () => {
   const api = new GitHub('test-token');
-  await assert.rejects(api.upload('owner/repo', { id: 1, upload_url: 'https://example.com/steal' }, 'not-a-file', 'build.json'), /Unexpected/);
+  await assert.rejects(api.upload('owner/repo', { id: 1, upload_url: 'https://example.com/steal' }, 'not-a-file', 'build.json'), /上传地址不匹配/);
 });

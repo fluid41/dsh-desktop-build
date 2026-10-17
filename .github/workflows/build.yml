@@ -1,17 +1,18 @@
-name: Build unsigned Windows desktop
+name: 构建 Windows 安装包
 
 on:
+  # UTC 04、10、16、22 点，即北京时间 00、06、12、18 点。
   schedule:
-    - cron: '17 * * * *'
+    - cron: '0 4,10,16,22 * * *'
   workflow_dispatch:
     inputs:
       tag:
-        description: '官方版本 tag；latest 自动选择最新版本（不构建分支）'
+        description: '官方预发布标签；latest 选择最新版'
         type: string
         required: true
         default: latest
 
-# One channel, including discovery and publication, across scheduled/manual runs.
+# 定时和手动任务共用同一队列，按顺序完成检查、构建和发布。
 concurrency:
   group: desktop-channel
   cancel-in-progress: false
@@ -20,6 +21,7 @@ permissions: {}
 
 jobs:
   discover:
+    name: 检查官方版本
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -32,17 +34,18 @@ jobs:
       pnpm_version: ${{ steps.discover.outputs.pnpm_version }}
       release_tag: ${{ steps.discover.outputs.release_tag }}
     steps:
-      - name: Checkout this builder
+      - name: 检出构建脚本
         uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v5
+      - name: 安装 Node.js
+        uses: actions/setup-node@v5
         with:
           node-version: '24'
           package-manager-cache: false
-      - name: Test version selection and release publication
+      - name: 运行回归测试
         run: node --test --test-isolation=none tests/*.test.mjs
-      - name: Resolve an official tag to an immutable commit
+      - name: 确定官方标签与源码提交
         id: discover
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,7 +53,7 @@ jobs:
         run: |
           set -o pipefail
           node scripts/cli.mjs discover 2>&1 | tee "$RUNNER_TEMP/discover.log"
-      - name: Retain discovery failure log
+      - name: 保存版本检查失败日志
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -60,6 +63,7 @@ jobs:
           retention-days: 14
 
   build:
+    name: 构建与校验
     needs: discover
     if: needs.discover.outputs.should_build == 'true'
     runs-on: windows-2025
@@ -77,12 +81,12 @@ jobs:
       DSH_PACKAGING_CONFIG_DIR: ${{ github.workspace }}/.local/desktop-packaging
       DSH_TELEMETRY_DISABLED: '1'
     steps:
-      - name: Checkout this builder at the workflow commit
+      - name: 检出本次工作流对应的构建脚本
         uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Checkout only the official source at the resolved SHA
+      - name: 检出指定提交的官方源码
         id: source
         uses: actions/checkout@v5
         with:
@@ -91,7 +95,7 @@ jobs:
           path: source
           persist-credentials: false
           fetch-depth: 1
-      - name: Check pristine source and manifest inputs
+      - name: 核对源码状态与版本信息
         env:
           SOURCE_SHA: ${{ needs.discover.outputs.source_sha }}
           SOURCE_VERSION: ${{ needs.discover.outputs.version }}
@@ -99,58 +103,59 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path $env:LOG_DIR | Out-Null
           $head = git -C $env:SOURCE_DIR rev-parse HEAD
-          if ($LASTEXITCODE -ne 0 -or $head -cne $env:SOURCE_SHA) { throw 'Source HEAD differs from selected SHA' }
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:SOURCE_SHA) { throw '源码提交与选定的 SHA 不一致' }
           git -C $env:SOURCE_DIR diff --exit-code HEAD -- | Tee-Object -FilePath "$env:LOG_DIR/source-before.diff"
-          if ($LASTEXITCODE -ne 0) { throw 'Source has tracked changes before build' }
+          if ($LASTEXITCODE -ne 0) { throw '构建前发现源码有改动' }
           $status = @(git -C $env:SOURCE_DIR status --porcelain=v1 --untracked-files=all)
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect source status' }
+          if ($LASTEXITCODE -ne 0) { throw '无法读取源码状态' }
           $status | Set-Content -Encoding utf8 "$env:LOG_DIR/source-before.status"
-          if ($status.Count -ne 0) { throw 'Source must start completely clean' }
+          if ($status.Count -ne 0) { throw '构建前的源码目录必须没有改动' }
           $manifest = Get-Content -Raw "$env:SOURCE_DIR/package.json" | ConvertFrom-Json
           $desktop = Get-Content -Raw "$env:SOURCE_DIR/apps/desktop/package.json" | ConvertFrom-Json
-          if ($manifest.version -cne $env:SOURCE_VERSION -or $desktop.version -cne $env:SOURCE_VERSION) { throw 'Source manifest versions do not match discovery' }
-          if ($manifest.packageManager -notmatch '^pnpm@([0-9]+\.[0-9]+\.[0-9]+)(?:\+sha[0-9]+\.[A-Za-z0-9+/=]+)?$') { throw 'Source must declare an exact pnpm packageManager' }
-          if ($Matches[1] -cne $env:PNPM_VERSION) { throw 'pnpm manifest differs from discovery' }
-      - uses: actions/setup-node@v5
+          if ($manifest.version -cne $env:SOURCE_VERSION -or $desktop.version -cne $env:SOURCE_VERSION) { throw '源码版本与检查结果不一致' }
+          if ($manifest.packageManager -notmatch '^pnpm@([0-9]+\.[0-9]+\.[0-9]+)(?:\+sha[0-9]+\.[A-Za-z0-9+/=]+)?$') { throw '源码必须指定精确的 pnpm 版本' }
+          if ($Matches[1] -cne $env:PNPM_VERSION) { throw 'pnpm 版本与检查结果不一致' }
+      - name: 安装 Node.js
+        uses: actions/setup-node@v5
         with:
           node-version: '24'
           architecture: x64
           package-manager-cache: false
-      - name: Set up the exact source-declared pnpm
+      - name: 安装源码指定的 pnpm
         uses: pnpm/action-setup@v4
         with:
           package_json_file: source/package.json
           dest: ${{ runner.temp }}/builder-pnpm
           run_install: false
-      - name: Set up Python for native dependencies
+      - name: 安装原生依赖所需的 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           architecture: x64
-      - name: Locate pnpm store and record hosted toolchain
+      - name: 记录构建工具版本与缓存目录
         id: cache
         run: |
           $store = pnpm store path --silent
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot locate pnpm store' }
+          if ($LASTEXITCODE -ne 0) { throw '无法找到 pnpm 缓存目录' }
           "store=$store" >> $env:GITHUB_OUTPUT
           node --version | Tee-Object -FilePath "$env:LOG_DIR/toolchain.log"
-          if ($LASTEXITCODE -ne 0) { throw 'Node is unavailable' }
+          if ($LASTEXITCODE -ne 0) { throw 'Node.js 不可用' }
           pnpm --version | Tee-Object -FilePath "$env:LOG_DIR/toolchain.log" -Append
-          if ($LASTEXITCODE -ne 0) { throw 'pnpm is unavailable' }
+          if ($LASTEXITCODE -ne 0) { throw 'pnpm 不可用' }
           python --version 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/toolchain.log" -Append
-          if ($LASTEXITCODE -ne 0) { throw 'Python is unavailable' }
+          if ($LASTEXITCODE -ne 0) { throw 'Python 不可用' }
           $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
           $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw 'Hosted Visual Studio C++ tools are missing' }
+          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw '构建环境缺少 Visual Studio C++ 工具' }
           $vs | Tee-Object -FilePath "$env:LOG_DIR/toolchain.log" -Append
-      - name: Cache only pnpm store and immutable runtime downloads
+      - name: 缓存依赖包与固定版本运行时
         uses: actions/cache@v4
         with:
           path: |
             ${{ steps.cache.outputs.store }}
             source/apps/desktop/.desktop-build/downloads
           key: desktop-v1-windows-2025-x64-node24-pnpm${{ needs.discover.outputs.pnpm_version }}-${{ hashFiles('source/pnpm-lock.yaml', 'source/pnpm-workspace.yaml', 'source/.npmrc', 'source/package.json', 'source/apps/desktop/package.json', 'source/scripts/primary-runtime/**', 'source/apps/desktop/scripts/**', 'source/apps/desktop/electron-builder.*') }}
-      - name: Create public production preset outside the source tree
+      - name: 在源码目录外生成打包配置
         run: |
           $presets = Join-Path $env:DSH_PACKAGING_CONFIG_DIR 'presets'
           New-Item -ItemType Directory -Force -Path $presets | Out-Null
@@ -160,23 +165,23 @@ jobs:
           DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN=https://harness.deepseek.com
           DSH_DESKTOP_MANDATORY_UPDATE_CONFIG='{}'
           '@ | Set-Content -Encoding utf8 (Join-Path $presets 'production.env')
-      - name: Install frozen upstream dependencies
+      - name: 按官方锁文件安装依赖
         working-directory: source
         run: |
           pnpm install --frozen-lockfile 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/install.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Check the complete public unsigned packaging entrypoint
+      - name: 检查上游未签名打包环境
         working-directory: source
         run: |
           pnpm run package:desktop:win:x64:unsigned --check 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/package-check.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build with the unmodified public unsigned packaging entrypoint
+      - name: 运行上游未签名打包流程
         working-directory: source
         run: |
           pnpm run package:desktop:win:x64:unsigned 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/package.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      # Run even after install/check/build fails. Never reset or hide tracked changes.
-      - name: Audit source tracked diff and status after every build outcome
+      # 无论构建成功或失败，都检查并保留源码差异，不重置或隐藏改动。
+      - name: 检查构建后的源码状态
         if: always() && steps.source.outcome == 'success'
         env:
           SOURCE_SHA: ${{ needs.discover.outputs.source_sha }}
@@ -191,9 +196,9 @@ jobs:
           $head = git -C $env:SOURCE_DIR rev-parse HEAD
           $headResult = $LASTEXITCODE
           if ($diffResult -ne 0 -or $statusResult -ne 0 -or $trackedResult -ne 0 -or $headResult -ne 0 -or $head -cne $env:SOURCE_SHA) {
-            throw 'Source changed or audit failed; refusing publication. See source-after diagnostics.'
+            throw '源码发生改动或状态检查失败，已停止发布；请查看 source-after 诊断记录。'
           }
-      - name: Collect exactly one EXE with verified metadata and SHA256
+      - name: 收集安装包并生成构建清单和校验值
         env:
           SOURCE_TAG: ${{ needs.discover.outputs.tag }}
           SOURCE_SHA: ${{ needs.discover.outputs.source_sha }}
@@ -202,7 +207,7 @@ jobs:
         run: |
           node scripts/cli.mjs collect 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/collect.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Upload verified publication bundle
+      - name: 上传已校验的发布文件
         uses: actions/upload-artifact@v4
         with:
           name: desktop-bundle-${{ github.run_id }}-${{ github.run_attempt }}
@@ -210,7 +215,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
-      - name: Retain build and source-audit diagnostics, including failures
+      - name: 保存构建日志与源码检查记录
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -223,6 +228,7 @@ jobs:
           retention-days: 14
 
   publish:
+    name: 发布安装包
     needs: [discover, build]
     if: >-
       always() && needs.discover.result == 'success' &&
@@ -235,36 +241,37 @@ jobs:
     env:
       BUNDLE_DIR: ${{ github.workspace }}/bundle
     steps:
-      - name: Checkout trusted builder only (never execute upstream here)
+      - name: 检出构建脚本（发布任务不执行上游代码）
         uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v5
+      - name: 安装 Node.js
+        uses: actions/setup-node@v5
         with:
           node-version: '24'
           package-manager-cache: false
-      - name: Download the verified Windows bundle from this run
+      - name: 下载本次构建的发布文件
         if: needs.discover.outputs.should_build == 'true'
         uses: actions/download-artifact@v4
         with:
           name: desktop-bundle-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.BUNDLE_DIR }}
-      - name: Publish verified versioned prerelease, then update current
+      - name: 发布新版本并更新下载入口
         if: needs.discover.outputs.should_build == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
           node scripts/cli.mjs publish 2>&1 | tee "$RUNNER_TEMP/publish.log"
-      - name: Repair current pointer when this version is already published
+      - name: 版本已发布时同步下载入口
         if: needs.discover.outputs.should_build == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
           node scripts/cli.mjs refresh 2>&1 | tee "$RUNNER_TEMP/publish.log"
-      - name: Retain publication failure log
+      - name: 保存发布失败日志
         if: failure()
         uses: actions/upload-artifact@v4
         with:

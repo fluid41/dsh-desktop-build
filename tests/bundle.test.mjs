@@ -37,20 +37,20 @@ test('a modified asset is rejected before a release upload', async t => {
   const { env } = await fixture(t);
   const build = await collect(env);
   await writeFile(join(env.BUNDLE_DIR, build.installer), 'changed installer bytes');
-  await assert.rejects(validateBundle(env.BUNDLE_DIR), /checksum mismatch/);
+  await assert.rejects(validateBundle(env.BUNDLE_DIR), /校验值不一致/);
 });
 
 test('more than one installer cannot become a publication bundle', async t => {
   const { env, artifacts } = await fixture(t);
   await writeFile(join(artifacts, 'unexpected.exe'), 'not the selected product');
-  await assert.rejects(collect(env), /exactly one/);
+  await assert.rejects(collect(env), /应有且仅有一个/);
 });
 
 test('source version mismatch and unexpectedly small output fail collection', async t => {
   const { env, exe, source } = await fixture(t);
   await writeFile(exe, 'tiny');
-  await assert.rejects(collect(env), /unexpectedly small/);
+  await assert.rejects(collect(env), /体积异常/);
   const original = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'));
   await writeFile(join(source, 'package.json'), JSON.stringify({ ...original, version: '0.2.1-alpha.4' }));
-  await assert.rejects(collect(env), /disagree/);
+  await assert.rejects(collect(env), /不一致/);
 });
