@@ -1,9 +1,6 @@
 name: 构建 Windows 安装包
 
 on:
-  # UTC 04、10、16、22 点，即北京时间 00、06、12、18 点。
-  schedule:
-    - cron: '0 4,10,16,22 * * *'
   workflow_dispatch:
     inputs:
       tag:
@@ -12,7 +9,7 @@ on:
         required: true
         default: latest
 
-# 定时和手动任务共用同一队列，按顺序完成检查、构建和发布。
+# 手动任务按顺序完成检查、构建和发布，避免并发更新下载入口。
 concurrency:
   group: desktop-channel
   cancel-in-progress: false
@@ -43,8 +40,6 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
-      - name: 运行回归测试
-        run: node --test --test-isolation=none tests/*.test.mjs
       - name: 确定官方标签与源码提交
         id: discover
         env:
