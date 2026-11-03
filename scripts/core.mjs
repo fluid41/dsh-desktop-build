@@ -117,20 +117,10 @@ export function renderReleaseBody(build, exeHash) {
 
 ${DSH_BADGE}
 
-基于官方预发布标签原样构建，已通过上游打包和运行时检查。
+官方标签原样构建。退出 DSH 后运行下方 EXE，装到原目录即可。
 
-### 安装与更新
-
-从系统托盘完全退出 DSH 后，运行下方 EXE，安装到原目录即可。更新或从官方版迁移无需先卸载；首次迁移前建议备份数据。
-
-安装包未签名，Windows 可能提示未知发布者。此构建需手动更新，保留上游强制更新策略。
-
-### 构建信息
-
-- 官方源码：[${build.sourceTag}](https://github.com/${UPSTREAM}/tree/${build.sourceSha})
-- 源码提交：\`${build.sourceSha}\`
-- 构建日志：[GitHub Actions](${build.runUrl})
-- 安装包 SHA-256：\`${exeHash}\`
+- 源码：[${build.sourceTag}](https://github.com/${UPSTREAM}/tree/${build.sourceSha}) · [构建日志](${build.runUrl})
+- SHA-256：\`${exeHash}\`
 
 <!-- dsh-source-sha:${build.sourceSha} -->
 `;
@@ -147,15 +137,9 @@ ${DSH_BADGE}
 
 ## [下载 Windows x64 安装包](${exe.browser_download_url})
 
-[SHA-256 校验值](${sums.browser_download_url}) · [版本与构建详情](${release.html_url}) · [历史版本](${historyUrl})
+[SHA-256](${sums.browser_download_url}) · [构建详情](${release.html_url}) · [历史版本](${historyUrl})
 
-官方源码原样构建 · 检查通过 · 未签名 · 手动更新
-
-完全退出 DSH 后运行安装包，安装到原目录即可，无需先卸载。
-
-仅手动触发构建，不定时检查新版。打开仓库 **Actions → 构建 Windows 安装包 → Run workflow**，选择最新版或指定官方预发布标签。构建并校验成功后更新此入口，失败时保留上一可用版本。
-
-在仓库 **Watch → Custom → Releases** 订阅新版通知。
+官方源码原样构建，未签名。退出 DSH 后运行安装包即可。
 
 <!-- dsh-current-version:${version} -->
 <!-- dsh-source-sha:${sourceSha} -->
