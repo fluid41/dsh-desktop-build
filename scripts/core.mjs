@@ -99,6 +99,7 @@ export function shouldBuild(existing, tag, sourceSha) {
   return false;
 }
 
+/** 下载入口跟随官方迭代顺序：取发布时间最新的完整构建。 */
 export function selectCurrentRelease(releases) {
   const complete = releases.filter(item => {
     if (!item.tag_name?.startsWith('desktop-dsh-v') || item.draft) return false;
@@ -106,7 +107,7 @@ export function selectCurrentRelease(releases) {
     assertCompleteRelease(item);
     return true;
   });
-  complete.sort((a, b) => compareVersions(releaseIdentity(b).version, releaseIdentity(a).version));
+  complete.sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at));
   if (!complete.length) throw new Error('没有文件完整的 Desktop 构建版本');
   return complete[0];
 }

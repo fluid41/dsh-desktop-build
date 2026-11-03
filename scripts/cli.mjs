@@ -122,11 +122,6 @@ export async function refresh(env, api) {
   const current = await api.getRelease(repo, CURRENT_TAG);
   const body = renderCurrentBody(release);
   if (current?.body === body && current.draft === false) { console.log(`下载入口已是 ${identity.version}`); return release; }
-  const oldVersion = /<!-- dsh-current-version:([^ ]+) -->/.exec(current?.body ?? '')?.[1];
-  if (oldVersion) {
-    const { compareVersions } = await import('./core.mjs');
-    if (compareVersions(oldVersion, identity.version) > 0) throw new Error('目标版本低于当前版本，已停止更新下载入口');
-  }
   const fields = { name: `当前下载 · DSH Desktop ${identity.version}`, body, draft: false, prerelease: false, make_latest: 'true' };
   if (current) await api.request(`/repos/${repo}/releases/${current.id}`, { method: 'PATCH', body: fields });
   else await api.request(`/repos/${repo}/releases`, { method: 'POST', body: { ...fields, tag_name: CURRENT_TAG, target_commitish: commit(required(env, 'GITHUB_SHA')) } });
