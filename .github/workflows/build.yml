@@ -81,6 +81,7 @@ jobs:
       DSH_PACKAGING_PRESET: production
       DSH_PACKAGING_CONFIG_DIR: ${{ github.workspace }}/.local/desktop-packaging
       DSH_TELEMETRY_DISABLED: '1'
+      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder-cache
     steps:
       - name: 检出本次工作流对应的构建脚本
         uses: actions/checkout@v5
@@ -155,6 +156,7 @@ jobs:
           path: |
             ${{ steps.cache.outputs.store }}
             source/apps/desktop/.desktop-build/downloads
+            ${{ env.ELECTRON_BUILDER_CACHE }}
           key: desktop-v1-windows-2025-x64-node24-pnpm${{ needs.discover.outputs.pnpm_version }}-${{ hashFiles('source/pnpm-lock.yaml', 'source/pnpm-workspace.yaml', 'source/.npmrc', 'source/package.json', 'source/apps/desktop/package.json', 'source/scripts/primary-runtime/**', 'source/apps/desktop/scripts/**', 'source/apps/desktop/electron-builder.*') }}
           restore-keys: |
             desktop-v1-windows-2025-x64-node24-pnpm${{ needs.discover.outputs.pnpm_version }}-
@@ -181,8 +183,13 @@ jobs:
       - name: 运行上游未签名打包流程
         working-directory: source
         run: |
-          pnpm run package:desktop:win:x64:unsigned 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/package.log"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            "Package attempt $attempt" | Tee-Object -FilePath "$env:LOG_DIR/package.log" -Append
+            pnpm run package:desktop:win:x64:unsigned 2>&1 | Tee-Object -FilePath "$env:LOG_DIR/package.log" -Append
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 30 }
+          }
+          exit 1
       # 无论构建成功或失败，都检查并保留源码差异，不重置或隐藏改动。
       - name: 检查构建后的源码状态
         if: always() && steps.source.outcome == 'success'
