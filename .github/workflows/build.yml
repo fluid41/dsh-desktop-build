@@ -8,6 +8,11 @@ on:
         type: string
         required: true
         default: latest
+      source_sha:
+        description: '可选：上游源码提交 SHA；留空则使用标签提交'
+        type: string
+        required: false
+        default: ''
 
 # 手动任务按顺序完成检查、构建和发布，避免并发更新下载入口。
 concurrency:
@@ -45,6 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_TAG: ${{ inputs.tag || 'latest' }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha || '' }}
         run: |
           set -o pipefail
           node scripts/cli.mjs discover 2>&1 | tee "$RUNNER_TEMP/discover.log"

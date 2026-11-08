@@ -18,7 +18,8 @@ export async function discover(env, api) {
   const repo = repository(env);
   const selected = selectUpstreamRelease(await api.listReleases(UPSTREAM), env.INPUT_TAG?.trim() || 'latest');
   const tag = selected.tag_name;
-  const sourceSha = await api.resolveTag(UPSTREAM, tag);
+  const requestedSha = env.INPUT_SOURCE_SHA?.trim();
+  const sourceSha = requestedSha ? commit(requestedSha) : await api.resolveTag(UPSTREAM, tag);
   const [root, desktop] = await Promise.all([api.manifest(UPSTREAM, 'package.json', sourceSha), api.manifest(UPSTREAM, 'apps/desktop/package.json', sourceSha)]);
   const source = validateSource(tag, root, desktop);
   const existing = await api.getRelease(repo, releaseTag(tag));
