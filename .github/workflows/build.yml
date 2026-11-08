@@ -156,6 +156,8 @@ jobs:
             ${{ steps.cache.outputs.store }}
             source/apps/desktop/.desktop-build/downloads
           key: desktop-v1-windows-2025-x64-node24-pnpm${{ needs.discover.outputs.pnpm_version }}-${{ hashFiles('source/pnpm-lock.yaml', 'source/pnpm-workspace.yaml', 'source/.npmrc', 'source/package.json', 'source/apps/desktop/package.json', 'source/scripts/primary-runtime/**', 'source/apps/desktop/scripts/**', 'source/apps/desktop/electron-builder.*') }}
+          restore-keys: |
+            desktop-v1-windows-2025-x64-node24-pnpm${{ needs.discover.outputs.pnpm_version }}-
       - name: 在源码目录外生成打包配置
         run: |
           $presets = Join-Path $env:DSH_PACKAGING_CONFIG_DIR 'presets'
