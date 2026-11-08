@@ -81,7 +81,7 @@ jobs:
       DSH_PACKAGING_PRESET: production
       DSH_PACKAGING_CONFIG_DIR: ${{ github.workspace }}/.local/desktop-packaging
       DSH_TELEMETRY_DISABLED: '1'
-      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder-cache
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.local/electron-builder-cache
     steps:
       - name: 检出本次工作流对应的构建脚本
         uses: actions/checkout@v5
