@@ -10,6 +10,6 @@
 
 ## 构建新版
 
-仅手动触发：[Actions → Run workflow](https://github.com/fluid41/dsh-desktop-build/actions/workflows/build.yml)，填 `latest` 或官方标签（如 `dsh-v0.2.2-alpha.2`）。已构建的版本不重复构建，失败时保留上一可用版本。
+仅手动触发：[Actions → Run workflow](https://github.com/fluid41/dsh-desktop-build/actions/workflows/build.yml)，填 `latest` 或官方标签（如 `dsh-v0.2.2-rc.1`）。`source_sha` 留空则构建标签提交，填写则改用指定的上游提交。已构建的版本不重复构建，失败时保留上一可用版本。
 
 在 GitHub 托管环境运行上游完整打包流程，本机无需编译工具。个人构建，非官方渠道。
